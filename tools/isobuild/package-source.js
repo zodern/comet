@@ -834,10 +834,20 @@ _.extend(PackageSource.prototype, {
   }),
 
   _readAndWatchDirectory(relDir, watchSet, {include, exclude, names}) {
-    return watch.readAndWatchDirectory(watchSet, {
+    const options = {
       absPath: files.pathJoin(this.sourceRoot, relDir),
       include, exclude, names
-    }).map(name => files.pathJoin(relDir, name));
+    };
+    let contents = watch.readDirectory(options);
+
+    if (watchSet) {
+      watchSet.addDirectory({
+        contents,
+        ...options
+      })
+    }
+
+    return contents.map(name => files.pathJoin(relDir, name));
   },
 
   // Initialize a package from an application directory (has .meteor/packages).
@@ -1304,12 +1314,14 @@ _.extend(PackageSource.prototype, {
         }
       }
 
+      let dirWatchSet = inNodeModules ? null : watchSet
+
       const sources = _.difference(
-        self._readAndWatchDirectory(dir, watchSet, readOptions),
+        self._readAndWatchDirectory(dir, dirWatchSet, readOptions),
         depth > 0 ? [] : controlFiles
       );
 
-      const subdirectories = self._readAndWatchDirectory(dir, watchSet, {
+      const subdirectories = self._readAndWatchDirectory(dir, dirWatchSet, {
         include: [/\/$/],
         exclude: depth > 0
           ? anyLevelExcludes
