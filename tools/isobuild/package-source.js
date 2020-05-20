@@ -18,6 +18,10 @@ import { PackageNamespace } from "./package-namespace.js";
 import { PackageNpm } from "./package-npm.js";
 import { PackageCordova } from "./package-cordova.js";
 import { PackageAPI } from "./package-api.js";
+import { posix } from 'path';
+
+// unsafeBasename does not convert paths to and from os paths
+const { basename: unsafeBasename } = posix;
 
 import {
   TEST_FILENAME_REGEXPS,
@@ -79,6 +83,14 @@ var loadOrderSort = function (sourceProcessorSet, arch) {
   });
 
   return function (a, b) {
+    // A large amount of the time sorting was spent
+    // converting paths to and from os path
+    // Since all paths are already posix paths here,
+    // and they are files which avoid the cross platform differences,
+    // we can skip that step.
+    const aBasename = unsafeBasename(a);
+    const bBasename = unsafeBasename(b);
+
     // XXX MODERATELY SIZED HACK --
     // push template files ahead of everything else. this is
     // important because the user wants to be able to say
@@ -87,15 +99,15 @@ var loadOrderSort = function (sourceProcessorSet, arch) {
     // before the corresponding .html file.
     //
     // maybe all of the templates should go in one file?
-    var isTemplate_a = isTemplate(files.pathBasename(a));
-    var isTemplate_b = isTemplate(files.pathBasename(b));
+    var isTemplate_a = isTemplate(aBasename);
+    var isTemplate_b = isTemplate(bBasename);
     if (isTemplate_a !== isTemplate_b) {
       return (isTemplate_a ? -1 : 1);
     }
 
     // main.* loaded last
-    var ismain_a = (files.pathBasename(a).indexOf('main.') === 0);
-    var ismain_b = (files.pathBasename(b).indexOf('main.') === 0);
+    var ismain_a = (aBasename.indexOf('main.') === 0);
+    var ismain_b = (bBasename.indexOf('main.') === 0);
     if (ismain_a !== ismain_b) {
       return (ismain_a ? 1 : -1);
     }
