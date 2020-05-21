@@ -225,14 +225,43 @@ var getExcerptFromReadme = function (text) {
 class SymlinkLoopChecker {
   constructor(sourceRoot) {
     this.sourceRoot = sourceRoot;
+    this._realSourceRoot = files.realpath(sourceRoot);
     this._seenPaths = {};
+    this._cache = new Map();
   }
 
-  check(relDir, quietly = true) {
-    const absPath = files.pathJoin(this.sourceRoot, relDir);
+  // Avoids running realpath unless necessary
+  // since it is relatively slow on windows
+  _realpath = Profile('_realpath', function (relDir) {
+    const absPath = files.pathJoin(this._realSourceRoot, relDir);
 
+    if (files.lstat(absPath).isSymbolicLink()) {
+      const result = files.realpath(absPath);
+      this._cache.set(relPath, result);
+
+      return result;
+    }
+
+    let result;
+    const parentDir = files.pathDirname(relDir);
+    const parentEntry = this._cache.get(parentDir);
+    if (parentDir === '.') {
+      result = absPath;
+    } else if (parentEntry) {
+      result = files.pathJoin(parentEntry, files.pathBasename(relDir));
+    } else {
+      // The parent dir was never checked, which prevents us from
+      // skipping realpath
+      result = files.realpath(absPath);
+    }
+
+    this._cache.set(relDir, result);
+    return result;
+  })
+
+  check(relDir, quietly = true) {
     try {
-      var realPath = files.realpath(absPath);
+      var realPath = this._realpath(relDir);
     } catch (e) {
       if (!e || e.code !== 'ELOOP') {
         throw e;
@@ -240,8 +269,8 @@ class SymlinkLoopChecker {
       // else leave realPath undefined
     }
 
-    if (! realPath || _.has(this._seenPaths, realPath)) {
-      if (! quietly) {
+    if (!realPath || _.has(this._seenPaths, realPath)) {
+      if (!quietly) {
         buildmessage.error("Symlink cycle detected at " + relDir);
       }
 
