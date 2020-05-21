@@ -1284,13 +1284,13 @@ _.extend(PackageSource.prototype, {
       return array;
     }
 
-    function find(dir, depth, inNodeModules) {
+    function find(dir, depth, { inNodeModules, canCache }) {
       // Remove trailing slash.
       dir = dir.replace(/\/$/, "");
 
       // If we're in a node_modules directory, cache the results of the
       // find function for the duration of the process.
-      let cacheKey = inNodeModules && makeCacheKey(dir);
+      let cacheKey = inNodeModules && canCache && makeCacheKey(dir);
       if (cacheKey &&
           cacheKey in self._findSourcesCache) {
         return self._findSourcesCache[cacheKey];
@@ -1368,7 +1368,7 @@ _.extend(PackageSource.prototype, {
           }
 
         } else {
-          sources.push(...find(subdir, depth + 1, inNodeModules));
+          sources.push(...find(subdir, depth + 1, { inNodeModules, canCache: false }));
         }
       });
 
@@ -1379,7 +1379,9 @@ _.extend(PackageSource.prototype, {
         // subdirectories, continue searching this node_modules directory,
         // so that any non-.js(on) files it contains can be imported by
         // the app (#6037).
-        sources.push(...find(nodeModulesDir, depth + 1, true));
+        // On rebuilds we do not use cache entries for subdirectories in
+        // node_modules. To reduce memory we do not cache them.
+        sources.push(...find(nodeModulesDir, depth + 1, { inNodeModules: true, canCache: !inNodeModules }));
       }
 
       delete dotMeteorIgnoreFiles[dir];
