@@ -425,7 +425,7 @@ export function treeHash(root: string, options: {
 // like mkdir -p. if it returns true, the item is a directory (even if
 // it was already created). if it returns false, the item is not a
 // directory and we couldn't make it one.
-export function mkdir_p(dir: string, mode: number | null = null) {
+export const mkdir_p = Profile("mkdir_", function mkdir_p(dir: string, mode: number | null = null) {
   const p = pathResolve(dir);
   const ps = pathNormalize(p).split(pathSep);
 
@@ -460,7 +460,7 @@ export function mkdir_p(dir: string, mode: number | null = null) {
 
   // double check we exist now
   return pathIsDirectory(p);
-}
+});
 
 function pathIsDirectory(path: string) {
   const stat = statOrNull(path);
@@ -1694,7 +1694,7 @@ export function copyFile(from: string, to: string, flags = 0) {
 }
 
 const wrappedRename = wrapDestructiveFsFunc("rename", fs.renameSync, [0, 1]);
-export const rename = isWindowsLikeFilesystem() ? function (from: string, to: string) {
+export const rename = isWindowsLikeFilesystem() ? Profile('rename_windows', function (from: string, to: string) {
   // Retries are necessary only on Windows, because the rename call can
   // fail with EBUSY, which means the file is in use.
   const osTo = convertToOSPath(to);
@@ -1731,7 +1731,7 @@ export const rename = isWindowsLikeFilesystem() ? function (from: string, to: st
       throw error;
     }
   }).await();
-} : wrappedRename;
+}) : wrappedRename;
 
 // Warning: doesn't convert slashes in the second 'cache' arg
 export const realpath =

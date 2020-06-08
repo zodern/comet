@@ -237,7 +237,7 @@ class SymlinkLoopChecker {
 
     if (files.lstat(absPath).isSymbolicLink()) {
       const result = files.realpath(absPath);
-      this._cache.set(relPath, result);
+      this._cache.set(relDir, result);
 
       return result;
     }
@@ -705,6 +705,17 @@ _.extend(PackageSource.prototype, {
       _.each(api.uses[label], doNotDepOnSelf);
       _.each(api.implies[label], doNotDepOnSelf);
     });
+
+    if (self.name === 'modules') {
+      // Since we can't use a forked version of modules
+      // we add a dependency to patch it
+      api.uses['web.browser'].push({
+        package: 'zodern:modules-runtime-hot',
+        constraint: '',
+        unordered: false,
+        weak: false
+      });
+    }
 
     // Cause packages that use `prodOnly` to automatically depend on the
     // `isobuild:prod-only` feature package, which will cause an error
