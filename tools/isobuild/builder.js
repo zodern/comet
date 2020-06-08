@@ -12,6 +12,9 @@ import {
   optimisticLStatOrNull,
   optimisticHashOrNull,
 } from "../fs/optimistic";
+import {
+  wrap
+} from 'optimism'
 
 // Builder is in charge of writing "bundles" to disk, which are
 // directory trees such as site archives, programs, and packages.  In
@@ -551,29 +554,9 @@ Previous builder: ${previousBuilder.outputPath}, this builder: ${outputPath}`
   }
 
   _ensureAllNonPackageDirectories(absFromDir, relToDir) {
-    const dirStat = optimisticStatOrNull(absFromDir);
-    if (! (dirStat && dirStat.isDirectory())) {
-      return;
-    }
-
-    const absFromPackageJson =
-      files.pathJoin(absFromDir, "package.json");
-
-    const stat = optimisticStatOrNull(absFromPackageJson);
-    if (stat && stat.isFile()) {
-      // If the directory has a package.json file, it's a package
-      // directory, and we should not call this._ensureDirectory, so that
-      // the package directory can later be symlinked in copyDirectory.
-      return;
-    }
-
-    this._ensureDirectory(relToDir);
-
-    optimisticReaddir(absFromDir).forEach(item => {
-      this._ensureAllNonPackageDirectories(
-        files.pathJoin(absFromDir, item),
-        files.pathJoin(relToDir, item)
-      );
+    const nonPackageDirs = findAllNonPackageDirectories(absFromDir, relToDir);
+    nonPackageDirs.forEach((packageRelToDir) => {
+      this._ensureDirectory(relToDir);
     });
   }
 
@@ -949,13 +932,60 @@ function symlinkIfPossible(source, target) {
   }
 }
 
+const findAllNonPackageDirectories = wrap(
+  function findAllNonPackageDirectories(absBaseFromDir, relBaseToDir) {
+    const result = [];
+
+    function walk(absFromDir, relToDir) {
+      const dirStat = optimisticStatOrNull(absFromDir);
+      if (!(dirStat && dirStat.isDirectory())) {
+        return;
+      }
+
+      const absFromPackageJson =
+        files.pathJoin(absFromDir, "package.json");
+
+      const stat = optimisticStatOrNull(absFromPackageJson);
+      if (stat && stat.isFile()) {
+        // If the directory has a package.json file, it's a package
+        // directory, and we should not call this._ensureDirectory, so that
+        // the package directory can later be symlinked in copyDirectory.
+        return;
+      }
+
+      result.push(relToDir)
+
+      optimisticReaddir(absFromDir).forEach(item => {
+        walk(
+          files.pathJoin(absFromDir, item),
+          files.pathJoin(relToDir, item)
+        );
+      });
+    }
+
+    walk(absBaseFromDir, relBaseToDir);
+    return result;
+  }, {
+    max: Math.pow(2, 12),
+    makeCacheKey(fromPath, toPath) {
+      return JSON.stringify({
+        fromPath,
+        toPath
+      });
+    }
+  }
+)
+
 // Wrap slow methods into Profiler calls
 const slowBuilderMethods = [
   "_ensureDirectory",
   "write",
   "enter",
   "copyDirectory",
+  "_copyDirectory",
   "copyNodeModulesDirectory",
+  "_ensureAllNonPackageDirectories",
+  "_findAllNonPackageDirectories",
   "enter",
   "complete",
 ];

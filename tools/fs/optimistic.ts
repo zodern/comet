@@ -16,7 +16,14 @@ import {
   readdir,
   dependOnPath,
   findAppDir,
+  toPosixPath
 } from "./files";
+import {
+  posix
+} from 'path'
+
+// unsafeIsAbsolute does not convert paths to and from os paths
+const { isAbsolute: unsafeIsAbsolute } = posix;
 
 // When in doubt, the optimistic caching system can be completely disabled
 // by setting this environment variable.
@@ -40,9 +47,12 @@ function makeOptimistic<
         // Cache nothing when the optimistic caching system is disabled.
         return;
       }
-
-      const path = args[0];
-      if (! pathIsAbsolute(path)) {
+      
+      // Converting the path to the os path was slow
+      // on Windows. Most of the time the path is already
+      // in posix format.
+      const path = toPosixPath(args[0]);
+      if (! unsafeIsAbsolute(path)) {
         return;
       }
 
