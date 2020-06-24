@@ -1,3 +1,7 @@
+function createId () {
+  return `${Date.now()}-${Math.random()}`
+}
+
 function comparePrelinkResult(previousResult, {
   name,
   module,
@@ -26,7 +30,8 @@ function comparePrelinkResult(previousResult, {
   function fileDetailsToSave (file) {
     return {
       content: file.getPrelinkedOutput({}).toStringWithSourceMap({}),
-      path: file.absModuleId
+      path: file.absModuleId,
+      meteorInstallOptions: file.meteorInstallOptions
     }
   }
 
@@ -38,6 +43,7 @@ function comparePrelinkResult(previousResult, {
     addedFiles: reloadable ? addedFiles.map(fileDetailsToSave) : [],
     changedFiles: reloadable ? changedFiles.map(fileDetailsToSave) : [],
     linkedAt: Date.now(),
+    id: createId(),
     name
   };
 
@@ -82,7 +88,7 @@ function compareFiles(previousHashes = new Map(), previousUnreloadable = [], cur
     unseenModules.delete(file.absModuleId);
   });
 
-  const removedFilePaths = unseenModules.keys();
+  const removedFilePaths = Array.from(unseenModules.keys());
   const unreloadableChanged = unreloadable.length !== previousUnreloadable.length ||
     unreloadable.some((hash, i) => hash !== previousUnreloadable[i]);
 

@@ -5,6 +5,8 @@ const ReifyEntry = require('/node_modules/meteor/modules/node_modules/reify/lib/
 // this could possibly be ran after the next build finished
 // TODO: the builder should inject the build time in the bundle
 let lastUpdated = Date.now();
+let appliedChangeSets = [];
+let reloadId = 0;
 
 let arch = __meteor_runtime_config__.isModern ? 'web.browser' : 'web.browser.legacy';
 let enabled = arch === 'web.browser';
@@ -29,6 +31,10 @@ function requestChanges() {
 
 socket.addEventListener('open', function () {
   console.log('HMR: connected');
+  socket.send(JSON.stringify({
+    type: 'register',
+    arch
+  }));
 });
 
 socket.addEventListener('message', function (event) {
@@ -36,17 +42,23 @@ socket.addEventListener('message', function (event) {
 
   switch (message.type) {
     case 'changes':
-      // TODO: support removed or added files
+      // TODO: support removed
       const hasUnreloadable = message.changeSets.find(changeSet => {
         return !changeSet.reloadable ||
-          changeSet.removedFilePaths.length > 0 ||
-          changeSet.addedFiles.length > 0
+          changeSet.removedFilePaths.length > 0
       })
+
       if (
         pendingReload &&
         hasUnreloadable ||
         message.changeSets.length === 0
       ) {
+        // This was an attempt to reload before the build finishes
+        // If we can't, we will wait until the build finishes to properly handle it
+        if (message.eager) {
+          return
+        }
+
         console.log('HMR: Unable to do HMR. Falling back to hot code push.')
         // Complete hot code push if we can not do hot module reload
         mustReload = true;
@@ -56,11 +68,14 @@ socket.addEventListener('message', function (event) {
       // In case the user changed how a module works with HMR
       // in one of the earlier change sets, we want to apply each
       // change set one at a time.
-      message.changeSets.forEach(changeSet => {
+      message.changeSets.filter(changeSet => {
+        return !appliedChangeSets.includes(changeSet.id)
+      }).forEach(changeSet => {
+        appliedChangeSets.push(changeSet.id);
         applyChangeset(changeSet);
       });
 
-      if (message.changeSets.length > 0) {
+      if (!message.eager && message.changeSets.length > 0) {
         lastUpdated = message.changeSets[message.changeSets.length - 1].linkedAt;
       }
   }
@@ -86,20 +101,25 @@ function createInlineSourceMap(map) {
   return "//# sourceMappingURL=data:application/json;base64," + btoa(JSON.stringify(map));
 }
 
+function createModuleContent (code, map, id) {
+  return function () {
+    // TODO: Use same sourceURL as the sourcemap for the main bundle does
+    return eval(
+      // Wrap the function(require,exports,module){...} expression in
+      // parentheses to force it to be parsed as an expression.
+      "(" + code + ")\n//# sourceURL=" + id +
+      "\n" + createInlineSourceMap(map)
+    ).apply(this, arguments);
+  }
+
+}
+
 function replaceFileContent(file, contents) {
   console.log('HMR: replacing module:', file.module.id);
 
   // TODO: to replace content in packages, we need an eval function that runs
   // within the package scope, like dynamic imports does.
-  const moduleFunction = function () {
-    // TODO: Use same sourceURL as the sourcemap for the main bundle does
-    return eval(
-      // Wrap the function(require,exports,module){...} expression in
-      // parentheses to force it to be parsed as an expression.
-      "(" + contents.code + ")\n//# sourceURL=" + file.module.id +
-      "\n" + createInlineSourceMap(contents.map)
-    ).apply(this, arguments);
-  }
+  const moduleFunction = createModuleContent(contents.code, contents.map, file.module.id);
 
   file.contents = moduleFunction;
 }
@@ -141,6 +161,25 @@ function findReloadableParents(importedBy) {
   }).flat(Infinity);
 }
 
+function addFiles(files) {
+  const tree = {};
+
+  console.log('HMR: Added files', files.map(file => file.path));
+
+  files.forEach(file => {
+    const segments = file.path.split('/').slice(1);
+    let previous = tree;
+    segments.splice(0, segments.length - 1).forEach(segment => {
+      previous[segment] = previous[segment] || {}
+      previous = previous[segment]
+    })
+    previous[segments[0]] = createModuleContent(file.content.code, file.content.map, file.path);
+  })
+
+  // TODO: group the files by meteorInstallOptions
+  meteorInstall(tree, files[0].meteorInstallOptions);
+}
+
 module.constructor.prototype.replaceModule = function (id, contents) {
   const moduleId = id || this.id;
   const root = this._getRoot();
@@ -159,6 +198,18 @@ module.constructor.prototype.replaceModule = function (id, contents) {
   if (!file.contents) {
     // File is a dynamic import that hasn't been loaded
     return null;
+  }
+
+  const hotState = file.module._hotState;
+  if (file._reloadedAt !== reloadId && hotState) {
+    file._reloadedAt = reloadId;
+
+    const hotData = {};
+    hotState._disposeHandlers.forEach(cb => {
+      cb(hotData);
+    });
+    hotState._disposeHandlers = [];
+    hotState.data = hotData;
   }
 
   if (contents) {
@@ -182,11 +233,10 @@ module.constructor.prototype.replaceModule = function (id, contents) {
 }
 
 function applyChangeset({
-  changedFiles
+  changedFiles,
+  addedFiles
 }) {
   // TODO: prevent requiring removed files
-  // TODO: install added files
-
   const reloadableParents = [];
   let hasImportedModules = false;
 
@@ -203,6 +253,10 @@ function applyChangeset({
     }
   });
 
+  if (addedFiles.length > 0) {
+    addFiles(addedFiles);
+  }
+
   // Check if some of the module's parents are not reloadable
   // In that case, we have to do a full reload
   // TODO: record which parents cause this
@@ -216,7 +270,10 @@ function applyChangeset({
     }
   }
 
+  reloadId += 1;
+
   // TODO: deduplicate
+  // TODO: handle errors
   reloadableParents.forEach(parent => {
     rerunFile(parent);
   });
@@ -237,6 +294,8 @@ Meteor.startup(() => {
     // We can't do anything here until Reload._onMigrate
     // has been called
     if (!pendingReload) {
+      nonRefreshableVersion = doc.versionNonRefreshable;
+
       return;
     }
 
