@@ -18,8 +18,13 @@ There have been many improvements in the build process, focused on reducing the 
 As an alternative to Hot Code Push in development, Hot Module Reload replaces  modules in the bundle that were modified without reloading the page.
 
 Use:
+1. Clone comet
+2. Run your app with
 ```
-  ../path/to/meteor --extra-packages zodern:hot
+# Windows
+/path/to/comet/meteor.bat --extra-packages hot-module-reload
+# osx or linux
+../path/to/comet/meteor --extra-packages hot-module-reload
 ```
 
 #### API
